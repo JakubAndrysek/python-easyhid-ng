@@ -1,14 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 # Copyright 2017 jem@seethis.link
 # Licensed under the MIT license (http://opensource.org/licenses/MIT)
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import annotations
 
-import cffi
 import ctypes.util
 import platform
 import sys
+
+import cffi
 
 ffi = cffi.FFI()
 ffi.cdef("""
@@ -50,41 +49,44 @@ const wchar_t* hid_error (hid_device *device);
 
 if "Windows" in platform.platform():
     try:
-        hidapi = ffi.dlopen('hidapi.dll')
-    except:
-        hidapi = ffi.dlopen(ctypes.util.find_library('hidapi.dll'))
+        hidapi = ffi.dlopen("hidapi.dll")
+    except Exception:
+        hidapi = ffi.dlopen(ctypes.util.find_library("hidapi.dll"))
 elif platform.platform().startswith("macOS"):
     try:
-        hidapi = ffi.dlopen('hidapi')
-    except:
-        hidapi = ffi.dlopen(ctypes.util.find_library('hidapi'))
+        hidapi = ffi.dlopen("hidapi")
+    except Exception:
+        hidapi = ffi.dlopen(ctypes.util.find_library("hidapi"))
 else:
     try:
-        hidapi = ffi.dlopen('hidapi-hidraw')
-    except:
-        libname = ctypes.util.find_library('hidapi-hidraw')
+        hidapi = ffi.dlopen("hidapi-hidraw")
+    except Exception:
+        libname = ctypes.util.find_library("hidapi-hidraw")
 
-        if sys.version_info < (3, 6) and libname == None:
+        if sys.version_info < (3, 6) and libname is None:
             # Couldn't find lib, use hardcode value so AppImage works.
             # Not need in >= 3.6 since ctypes.util.find_library will also
             # check LD_LIBRARY_PATH in newer versions of python.
-            libname = 'libhidapi-hidraw.so.0'
+            libname = "libhidapi-hidraw.so.0"
         hidapi = ffi.dlopen(libname)
+
 
 def _c_to_py_str(val):
     if val == ffi.NULL:
         return None
 
     new_val = ffi.string(val)
-    if type(new_val) == bytes or type(new_val) == bytearray:
+    if isinstance(new_val, (bytes, bytearray)):
         return new_val.decode("utf-8")
     else:
         return new_val
 
+
 class HIDException(Exception):
     pass
 
-class HIDDevice(object):
+
+class HIDDevice:
     """
     A HID device for communication with a HID interface.
 
@@ -124,7 +126,7 @@ class HIDDevice(object):
         if self._is_open:
             raise HIDException("Failed to open device: HIDDevice already open")
 
-        path = self.path.encode('utf-8')
+        path = self.path.encode("utf-8")
         dev = hidapi.hid_open_path(path)
 
         if dev:
@@ -132,7 +134,6 @@ class HIDDevice(object):
             self._device = dev
         else:
             raise HIDException("Failed to open device")
-
 
     def close(self):
         """
@@ -161,7 +162,7 @@ class HIDDevice(object):
         cdata = ffi.new("const unsigned char[]", bytes(write_data))
         num_written = hidapi.hid_write(self._device, cdata, len(write_data))
         if num_written < 0:
-            raise HIDException("Failed to write to HID device: " + str(num_written))
+            raise HIDException(f"Failed to write to HID device: {num_written}")
         else:
             return num_written
 
@@ -186,14 +187,13 @@ class HIDDevice(object):
         cdata = ffi.new("unsigned char[]", data)
         bytes_read = None
 
-        if timeout == None:
+        if timeout is None:
             bytes_read = hidapi.hid_read(self._device, cdata, len(cdata))
         else:
             bytes_read = hidapi.hid_read_timeout(self._device, cdata, len(cdata), timeout)
 
-
         if bytes_read < 0:
-            raise HIDException("Failed to read from HID device: " + str(bytes_read))
+            raise HIDException(f"Failed to read from HID device: {bytes_read}")
         elif bytes_read == 0:
             return bytearray([])
         else:
@@ -203,7 +203,7 @@ class HIDDevice(object):
         if not self._is_open:
             raise HIDException("HIDDevice not open")
 
-        if type(enable_nonblocking) != bool:
+        if not isinstance(enable_nonblocking, bool):
             raise TypeError
         hidapi.hid_set_nonblocking(self._device, enable_nonblocking)
 
@@ -217,16 +217,10 @@ class HIDDevice(object):
         """
         if self._is_open:
             err = hidapi.hid_read_timeout(self._device, ffi.NULL, 0, 0)
-            if err == -1:
-                return False
-            else:
-                return True
+            return err != -1
         else:
             en = Enumeration(vid=self.vendor_id, pid=self.product_id).find(path=self.path)
-            if len(en) == 0:
-                return False
-            else:
-                return True
+            return len(en) != 0
 
     def send_feature_report(self, data, report_id=0x00):
         """
@@ -267,7 +261,7 @@ class HIDDevice(object):
         Returns:
             They bytes read from the HID report
         """
-        data = [0] * (size+1)
+        data = [0] * (size + 1)
         cdata = ffi.new("unsigned char[]", bytes(data))
         cdata[0] = report_id
 
@@ -276,7 +270,7 @@ class HIDDevice(object):
         if bytes_read == -1:
             raise HIDException("Failed to get feature report from HID device")
 
-        return bytearray(cdata[1:size+1])
+        return bytearray(cdata[1 : size + 1])
 
     def get_error(self):
         """
@@ -290,15 +284,15 @@ class HIDDevice(object):
 
     def _get_prod_string_common(self, hid_fn):
         max_len = 128
-        str_buf = ffi.new("wchar_t[]", bytearray(max_len).decode('utf-8'))
+        str_buf = ffi.new("wchar_t[]", bytearray(max_len).decode("utf-8"))
         ret = hid_fn(self._device, str_buf, max_len)
         if ret < 0:
             raise HIDException(self._device.get_error())
         else:
-            assert(ret == 0)
+            assert ret == 0
             return ffi.string(str_buf)
 
-    # Probably don't need these excpet for get_indexed_string, since they won't
+    # Probably don't need these except for get_indexed_string, since they won't
     # change from the values found in the enumeration
     def get_manufacture_string(self):
         """
@@ -331,33 +325,21 @@ class HIDDevice(object):
         elif ret == 0:
             return None
         else:
-            return ffi.string(str_buf).encode('utf-8')
-
+            return ffi.string(str_buf).encode("utf-8")
 
     def description(self):
         """
         Get a string describing the HID descriptor.
         """
-        return \
-"""HIDDevice:
-    {} | {:x}:{:x} | {} | {} | {}
-    release_number: {}
-    usage_page: {}
-    usage: {}
-    interface_number: {}\
-""".format(self.path,
-           self.vendor_id,
-           self.product_id,
-           self.manufacturer_string,
-           self.product_string,
-           self.serial_number,
-           self.release_number,
-           self.usage_page,
-           self.usage,
-           self.interface_number
-        )
+        return f"""HIDDevice:
+    {self.path} | {self.vendor_id:x}:{self.product_id:x} | {self.manufacturer_string} | {self.product_string} | {self.serial_number}
+    release_number: {self.release_number}
+    usage_page: {self.usage_page}
+    usage: {self.usage}
+    interface_number: {self.interface_number}"""
 
-class Enumeration(object):
+
+class Enumeration:
     def __init__(self, vid=0, pid=0):
         """
         Create a USB HID enumeration. The enumeration is a list of all the HID
@@ -372,9 +354,19 @@ class Enumeration(object):
         for dev in self.device_list:
             print(dev.description())
 
-    def find(self, vid=None, pid=None, serial=None, interface=None, \
-            path=None, release_number=None, manufacturer=None,
-            product=None, usage=None, usage_page=None):
+    def find(
+        self,
+        vid=None,
+        pid=None,
+        serial=None,
+        interface=None,
+        path=None,
+        release_number=None,
+        manufacturer=None,
+        product=None,
+        usage=None,
+        usage_page=None,
+    ):
         """
         Attempts to open a device in this `Enumeration` object. Optional
         arguments can be provided to filter the resulting list based on various
@@ -407,13 +399,13 @@ class Enumeration(object):
                 continue
             if product and dev.product_string != product:
                 continue
-            if release_number != None and dev.release_number != release_number:
+            if release_number is not None and dev.release_number != release_number:
                 continue
-            if interface != None and dev.interface_number != interface:
+            if interface is not None and dev.interface_number != interface:
                 continue
-            if usage != None and dev.usage != usage:
+            if usage is not None and dev.usage != usage:
                 continue
-            if usage_page != None and dev.usage_page != usage_page:
+            if usage_page is not None and dev.usage_page != usage_page:
                 continue
             result.append(dev)
         return result
@@ -427,7 +419,7 @@ def _hid_enumerate(vendor_id=0, product_id=0):
     """
     start = hidapi.hid_enumerate(vendor_id, product_id)
     result = []
-    cur = ffi.new("struct hid_device_info*");
+    cur = ffi.new("struct hid_device_info*")
     cur = start
 
     # Copy everything into python list
